@@ -4,15 +4,6 @@ import { Readable } from "node:stream";
 import { DemoError } from "./errors";
 import { jobDirectory, readJob } from "./video-store";
 
-export function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
-    throw new DemoError(
-      "ORIGIN_REJECTED",
-      "Cross-origin changes are not allowed.",
-      403,
-    );
-}
 export function byteRange(
   header: string | null,
   size: number,

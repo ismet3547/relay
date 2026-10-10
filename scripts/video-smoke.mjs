@@ -88,9 +88,10 @@ async function startServer() {
   }
   throw new Error("Server readiness timeout");
 }
-async function api(url, init = {}) {
-  const response = await fetch(base + url, {
+async function api(url, init = {}, origin = base) {
+  const response = await fetch(origin + url, {
     ...init,
+    headers: { Origin: origin, ...init.headers },
     signal: AbortSignal.timeout(15000),
   });
   return { status: response.status, body: await response.json() };
@@ -116,7 +117,7 @@ async function until(fn, limit = 180000, interval = 150) {
     "Timed out waiting for real processing: " + logs.slice(-2000),
   );
 }
-async function upload(filename, language = "auto") {
+async function upload(filename, language = "auto", origin = base) {
   const ext = path.extname(filename);
   const mime =
     ext === ".webm"
@@ -131,7 +132,7 @@ async function upload(filename, language = "auto") {
     new Blob([fs.readFileSync(filename)], { type: mime }),
     path.basename(filename),
   );
-  const result = await api("/api/videos", { method: "POST", body: form });
+  const result = await api("/api/videos", { method: "POST", body: form }, origin);
   assert.equal(result.status, 200, JSON.stringify(result.body));
   return result.body.job;
 }
@@ -354,12 +355,12 @@ try {
   successes.push(
     "An interrupted MOV transcription recovers from disk after worker restart and transcribes the real audio",
   );
-  const third = await upload(webm);
+  const third = await upload(webm, "auto", `http://localhost:${port}`);
   const converted = await finished(third.id);
   assert.equal(converted.status, "completed", JSON.stringify(converted.error));
   assert.equal(converted.language, "en");
   successes.push(
-    "WebM/Opus is decoded, normalized for browser playback, and genuinely transcribed",
+    "Localhost browser-origin upload accepts WebM/Opus and transcribes its real audio",
   );
   await stop(worker);
   const deleting = await upload(mp4, "en");
@@ -407,11 +408,19 @@ try {
     (await api("/api/videos", { method: "POST", body: fake })).status,
     415,
   );
-  const crossed = await api(`/api/videos/${first.id}`, {
-    method: "DELETE",
-    headers: { Origin: "https://elsewhere.test" },
-  });
-  assert.equal(crossed.status, 403);
+  for (const origin of ["https://elsewhere.test", `http://localhost:${port}`]) {
+    for (const [url, method, body] of [
+      ["/api/videos", "POST", fake],
+      [`/api/videos/${noAudioJob.id}/retry`, "POST", undefined],
+      [`/api/videos/${first.id}`, "DELETE", undefined],
+    ]) {
+      const crossed = await api(url, { method, body, headers: { Origin: origin } });
+      assert.equal(crossed.status, 403);
+      assert.equal(crossed.body.code, "ORIGIN_REJECTED");
+    }
+  }
+  assert.equal((await getJob(noAudioJob.id)).status, "failed");
+  assert.equal((await getJob(first.id)).status, "completed");
   successes.push(
     "No-audio, silent-speech, corrupt-decode, fake-signature, and cross-origin failure paths return safe errors with no fabricated text",
   );

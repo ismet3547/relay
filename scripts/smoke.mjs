@@ -14,7 +14,7 @@ const server = spawn(process.execPath, ["node_modules/next/dist/bin/next", "dev"
 server.stdout.on("data", data => { log += data.toString() });
 server.stderr.on("data", data => { log += data.toString() });
 async function api(url, data, method = "POST") {
-  const response = await fetch(base + url, { method, headers: { "Content-Type": "application/json" }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(15000) });
+  const response = await fetch(base + url, { method, headers: { Origin: base, "Content-Type": "application/json" }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal: AbortSignal.timeout(15000) });
   return { status: response.status, data: await response.json() };
 }
 const state = async () => (await api("/api/demo", undefined, "GET")).data;
@@ -30,6 +30,22 @@ try {
     await wait(300);
   }
   assert.ok(ready, "Development server did not become ready."); successes.push("Development server and App Router document return HTTP 200");
+  const localhost = `http://localhost:${port}`;
+  const localResponse = await fetch(localhost + "/api/calls", {
+    method: "POST", headers: { Origin: localhost, "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario: "invalid" }),
+  });
+  assert.equal(localResponse.status, 400);
+  assert.equal((await localResponse.json()).code, "VALIDATION_ERROR");
+  for (const origin of [localhost, "https://elsewhere.test", "null"]) {
+    const response = await fetch(base + "/api/calls", {
+      method: "POST", headers: { Origin: origin, "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario: "appointment" }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, "ORIGIN_REJECTED");
+  }
+  successes.push("Localhost browser origin is accepted; cross-site and mismatched loopback origins are rejected");
   const streamController = new AbortController();
   const streamResponse = await fetch(base + "/api/events", { signal: streamController.signal });
   assert.equal(streamResponse.headers.get("content-type"), "text/event-stream");

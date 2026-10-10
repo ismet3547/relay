@@ -8,10 +8,10 @@ Tests ran on Linux with Node.js 24.19.0, Next.js 16.4.0, React 19.3.0, Python 3.
 | --- | --- |
 | `npm run lint` | Passed, no lint errors or warnings |
 | `npm run typecheck` | Passed |
-| `npm test` | **28 passed, 0 failed, 0 skipped** |
+| `npm test` | **34 passed, 0 failed, 0 skipped** |
 | `npm run test:worker` | **6 passed** |
 | `npm run build` | Passed; page and all call/video API routes built |
-| `npm run test:api` | Passed, all eight HTTP/SSE checks |
+| `npm run test:api` | Passed, all nine HTTP/SSE checks |
 | `npm run test:video` | Passed, all eight real ASR / media / persistence checks |
 | `npm run transcriber:check` | Ready; Python, faster-whisper, FFmpeg, and ffprobe detected |
 | Combined local launcher and shutdown | Passed; both processes started, worker lock released |
@@ -20,16 +20,22 @@ Tests ran on Linux with Node.js 24.19.0, Next.js 16.4.0, React 19.3.0, Python 3.
 
 Dependencies were installed with `npm install`; `package-lock.json` records the install. Python dependencies were installed in `.venv`. Installing unbounded PyAV initially selected version 19 and exposed a real audio-decode failure: `metadata_errors` was removed. Pinning **PyAV 16.1.0** resolved it; the full real-speech integration test then passed. No canned transcript or paid transcription API was used.
 
+## Local Origin regression
+
+The reported upload failure was reproduced through an actual Next.js dev server: POST requests sent to `127.0.0.1` with that same browser Origin returned **403 / ORIGIN_REJECTED**. Next.js normalizes loopback URLs to `localhost`, so the old comparison with `request.url` disagreed with the actual browser address. Calls, uploads, retries, and deletions now share a check against the incoming Host and request protocol.
+
+Six added unit tests cover normalized loopback URLs, IPv6 authorities, exact host/port/protocol boundaries, invalid or opaque Origins, malformed Host headers, forwarded-host spoofing, direct Requests, and the shared call JSON guard. The HTTP/SSE test now sends browser Origin headers on every call mutation, accepts matching `localhost` requests, and rejects cross-site or mismatched loopback Origins. Video integration likewise sends Origin on uploads, retry, and deletion, with a separate real upload through `localhost`; cross-site and mismatched-alias upload/retry/delete requests must return 403 without changing jobs. Lint, type checking, and production build passed after the guard change.
+
 ## Real speech recognition
 
 The test used the upstream faster-whisper `tests/data/jfk.flac` public speech fixture. FFmpeg created an actual MP4 with a video stream and **three seconds of leading silence** before the spoken audio, plus MOV and WebM/Opus variants. Media, job JSON, transcripts, and derived audio were stored in an isolated temporary directory and removed afterward.
 
-The final MP4 run:
+The latest MP4 run:
 
 - Detected **English** automatically.
 - Recognized the expected speech, including “ask not what your country” and “what you can do for your country”.
 - Returned one actual recognizer segment with its first start at **2.93 seconds** (0.07 seconds before the known speech boundary).
-- Completed in **4.82 seconds** in this environment; this is one short-fixture result, not a general performance promise.
+- Completed in **2.88 seconds** in this environment; this is one short-fixture result, not a general performance promise.
 - Validated monotonic start/end timestamps inside actual normalized playback duration.
 - Recorded completion events for Upload, Validation, Extraction, Recognition, Timestamp checking, and Ready.
 - Removed extracted WAV audio after completion.

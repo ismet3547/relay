@@ -48,7 +48,11 @@ npm run model:download
 npm run dev:all
 ```
 
-Open **http://127.0.0.1:3000**. The launcher runs the web application and one Python worker; keep its terminal open. Next prints an alternative port if 3000 is occupied. `npm run dev` starts only the web application; in a second terminal, `npm run transcriber` starts the worker. Uploaded jobs remain queued when the worker is offline.
+Open **http://127.0.0.1:3000** or **http://localhost:3000**. The launcher runs the web application and one Python worker; keep its terminal open. Next prints an alternative port if 3000 is occupied. `npm run dev` starts only the web application; in a second terminal, `npm run transcriber` starts the worker. Uploaded jobs remain queued when the worker is offline.
+
+If the app shows **Transcription needs setup**, run `npm run transcriber:check` in the terminal used to launch Relay. For a missing FFmpeg warning on Windows, install `Gyan.FFmpeg` with the command above, reopen PowerShell, and confirm both `ffmpeg -version` and `ffprobe -version` work before restarting Relay. If using VS Code's integrated terminal, restart VS Code as well so its child processes receive the updated PATH.
+
+Local mutations compare the browser's Origin with the actual request Host and protocol. Next.js normalizes loopback URLs internally, so comparing Origin directly with `request.url` incorrectly rejects `127.0.0.1` uploads. Both local addresses work, while an Origin from a different host, alias, port, or protocol remains rejected. If an older checkout shows **Cross-origin uploads are not allowed**, pull the feature branch and restart the running web server.
 
 `npm run model:download` caches the multilingual Whisper **base** model locally. This first download requires internet access; after installation and model caching, recognition uses only local files. The app can also download the model lazily on its first job, but pre-downloading makes setup failures easier to diagnose. No Hugging Face token is needed for these public model weights.
 

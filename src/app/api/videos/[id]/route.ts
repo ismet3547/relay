@@ -1,6 +1,6 @@
 import { route } from "@/server/http";
 import { deleteJob, readJob } from "@/server/video-store";
-import { sameOrigin } from "@/server/video-http";
+import { sameOrigin } from "@/server/origin";
 export const runtime = "nodejs";
 export async function GET(
   _request: Request,

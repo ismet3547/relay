@@ -1,6 +1,6 @@
 import { route } from "@/server/http";
 import { retryJob } from "@/server/video-store";
-import { sameOrigin } from "@/server/video-http";
+import { sameOrigin } from "@/server/origin";
 export const runtime = "nodejs";
 export async function POST(
   request: Request,

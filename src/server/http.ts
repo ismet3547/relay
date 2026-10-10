@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { DemoError } from "./errors";
+import { sameOrigin } from "./origin";
 
 export async function body(request: Request): Promise<unknown> {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) throw new DemoError("ORIGIN_REJECTED", "Cross-origin demo writes are not allowed.", 403);
+  sameOrigin(request, "Cross-origin demo writes are not allowed.");
   if (!request.headers.get("content-type")?.includes("application/json")) throw new DemoError("INVALID_CONTENT_TYPE", "Send an application/json request.", 415);
   const text = await request.text();
   if (text.length > 4096) throw new DemoError("INPUT_TOO_LARGE", "Demo request is too large.", 413);

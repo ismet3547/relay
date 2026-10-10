@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import Busboy from "busboy";
 import { VideoJob } from "../lib/video";
 import { DemoError } from "./errors";
+import { sameOrigin } from "./origin";
 import { jobDirectory, videoConfig, videoRoot, writeJob } from "./video-store";
 
 export function validateVideoHeader(
@@ -41,13 +42,7 @@ export function validateVideoHeader(
     );
 }
 export async function uploadVideo(request: Request): Promise<VideoJob> {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
-    throw new DemoError(
-      "ORIGIN_REJECTED",
-      "Cross-origin uploads are not allowed.",
-      403,
-    );
+  sameOrigin(request, "Cross-origin uploads are not allowed.");
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.startsWith("multipart/form-data;") || !request.body)
     throw new DemoError(

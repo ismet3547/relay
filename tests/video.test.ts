@@ -130,7 +130,11 @@ test("a valid upload is queued durably with only the upload event; filename path
     "C:\\Users\\Private\\recording.mp4",
   );
   const job = await uploadVideo(
-    new Request("http://localhost/api/videos", { method: "POST", body: form }),
+    new Request("http://localhost/api/videos", {
+      method: "POST",
+      body: form,
+      headers: { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000" },
+    }),
   );
   assert.equal(job.filename, "recording.mp4");
   assert.equal(job.status, "queued");
