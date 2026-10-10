@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.demo-data/
+next-env.d.ts
+*.tsbuildinfo
+.env*
+coverage/
+.font-source/
