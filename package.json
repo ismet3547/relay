@@ -19,7 +19,8 @@
     "transcriber:check": "node scripts/run.mjs check",
     "model:download": "node scripts/run.mjs download",
     "test:worker": "node scripts/run.mjs test",
-    "test:video": "node scripts/video-smoke.mjs"
+    "test:video": "node scripts/video-smoke.mjs",
+    "test:cashier": "node scripts/cashier-smoke.mjs"
   },
   "dependencies": {
     "busboy": "1.6.0",

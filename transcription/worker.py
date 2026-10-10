@@ -127,6 +127,34 @@ def probe_media(file: Path, directory: Path):
         raise JobError("INVALID_MEDIA", "The video could not be inspected. Try exporting it again.") from None
 
 
+def validate_utterance_probe(probe, require_duration=False):
+    if not any(s.get("codec_type") == "audio" for s in probe.get("streams", [])):
+        raise JobError("NO_AUDIO", "The microphone recording has no audio track. Record again.")
+    raw = probe.get("format", {}).get("duration")
+    # MediaRecorder WebM blobs often have no duration metadata. Decode at most
+    # 31 seconds and validate the resulting WAV rather than rejecting live input.
+    if raw is None and not require_duration:
+        return None
+    try:
+        duration = float(raw)
+    except (ValueError, TypeError):
+        raise JobError("INVALID_AUDIO_DURATION", "The recording has an invalid duration.") from None
+    if not math.isfinite(duration) or duration <= 0:
+        raise JobError("INVALID_AUDIO_DURATION", "Record a finite, nonempty audio utterance.")
+    if duration > 30.25:
+        raise JobError("UTTERANCE_TOO_LONG", "Speak for 30 seconds or less per recording.")
+    return duration
+
+
+def probe_utterance(file: Path, directory: Path, require_duration=False):
+    raw = run_media(["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe",
+                     "-show_format", "-show_streams", "-of", "json", str(file)], directory, 15)
+    try:
+        return validate_utterance_probe(json.loads(raw), require_duration)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise JobError("INVALID_AUDIO", "The microphone recording could not be inspected. Record again.") from None
+
+
 def align_segments(segments, duration):
     """Validate Whisper timestamps against the exact playback audio timeline."""
     result = []
@@ -191,6 +219,72 @@ class Worker:
                 print(f"Model load failed: {type(error).__name__}", file=sys.stderr, flush=True)
                 raise JobError("MODEL_LOAD_FAILED", "The local speech model could not start. Check the model and CPU/GPU settings in the README, then retry.") from None
         return self.model
+
+    def process_utterance(self, directory: Path):
+        marker = directory / ".processing"
+        try:
+            marker.touch(exist_ok=False)
+            job = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        except FileExistsError:
+            return
+        except FileNotFoundError:
+            marker.unlink(missing_ok=True)
+            return
+        cancelled = False
+        try:
+            check_cancel(directory)
+            if job["status"] != "queued":
+                return
+            job.update(status="processing", updatedAt=now(), model=MODEL)
+            atomic_json(directory / "job.json", job)
+            source = directory / "source.audio"
+            if not source.exists() or source.stat().st_size > 4 * 1048576:
+                raise JobError("INVALID_AUDIO", "The recording is missing or too large. Record again.")
+            probe_utterance(source, directory)
+            audio = directory / "audio.wav"
+            run_media(["ffmpeg", "-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
+                       "-i", str(source), "-t", "31", "-map", "0:a:0", "-vn", "-threads", "2",
+                       "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(audio)], directory, 30)
+            job["duration"] = probe_utterance(audio, directory, require_duration=True)
+            model = self.get_model()
+            check_cancel(directory)
+            segments, info = model.transcribe(str(audio), language=None, beam_size=5,
+                                               vad_filter=True, condition_on_previous_text=False)
+            recognized = []
+            for segment in segments:
+                check_cancel(directory)
+                recognized.append({"start": segment.start, "end": segment.end, "text": segment.text})
+            aligned = align_segments(recognized, job["duration"])
+            text = " ".join(s["text"] for s in aligned).strip()
+            if len(text) > 1500:
+                raise JobError("UTTERANCE_TEXT_TOO_LONG", "The recognized utterance is too long. Speak a shorter request.")
+            job.update(status="completed", text=text, language=info.language,
+                       updatedAt=now(), completedAt=now())
+            job.pop("error", None)
+            atomic_json(directory / "job.json", job)
+            print(f"Recognized utterance {job['id']}: {info.language}, {job['duration']:.1f}s", flush=True)
+        except Cancelled:
+            cancelled = True
+            if directory.exists():
+                job.update(status="queued", updatedAt=now())
+                atomic_json(directory / "job.json", job)
+        except Exception as error:
+            if directory.exists():
+                known = isinstance(error, JobError)
+                code = error.code if known else "SPEECH_RECOGNITION_FAILED"
+                message = str(error) if known else "Local speech recognition failed. Check the worker and try typing."
+                if code in ("VIDEO_DECODE_FAILED", "MEDIA_TIMEOUT"):
+                    message = "The microphone recording could not be decoded in time. Record a shorter utterance."
+                if code == "NO_SPEECH":
+                    message = "No speech was detected. Speak clearly or use the text input."
+                job.update(status="failed", updatedAt=now(), error={"code": code, "message": message})
+                atomic_json(directory / "job.json", job)
+                print(f"Utterance failed {job['id']}: {type(error).__name__}", file=sys.stderr, flush=True)
+        finally:
+            (directory / "audio.wav").unlink(missing_ok=True)
+            marker.unlink(missing_ok=True)
+            if not cancelled:
+                (directory / "source.audio").unlink(missing_ok=True)
 
     def process(self, directory: Path):
         started = time.monotonic()
@@ -324,6 +418,8 @@ def main():
     ROOT.mkdir(parents=True, exist_ok=True)
     videos = ROOT / "videos"
     videos.mkdir(exist_ok=True)
+    utterances = ROOT / "utterances"
+    utterances.mkdir(exist_ok=True)
     acquire_lock()
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
@@ -349,8 +445,41 @@ def main():
             continue
     print("Relay local transcription worker ready." if health["status"] == "ready" else health["error"], flush=True)
     worker = Worker()
+    for directory in utterances.glob("utt_*"):
+        (directory / ".processing").unlink(missing_ok=True)
+        (directory / "audio.wav").unlink(missing_ok=True)
+        try:
+            job = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+            if job["status"] == "processing":
+                job.update(status="queued", updatedAt=now())
+                atomic_json(directory / "job.json", job)
+            elif job["status"] in ("completed", "failed"):
+                (directory / "source.audio").unlink(missing_ok=True)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
     while not STOP.is_set():
+        speech_queue = []
+        for directory in utterances.glob("utt_*"):
+            try:
+                job_file = directory / "job.json"
+                age = time.time() - (job_file.stat().st_mtime if job_file.exists() else directory.stat().st_mtime)
+                # Short audio is deleted immediately after recognition. Expire its
+                # transcript/job after one hour, including abandoned uploads.
+                if age > 3600:
+                    shutil.rmtree(directory, ignore_errors=True)
+                    continue
+                if job_file.exists():
+                    job = json.loads(job_file.read_text(encoding="utf-8"))
+                    if job["status"] == "queued":
+                        speech_queue.append((job["createdAt"], directory))
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
         if health["status"] == "ready":
+            # Prioritize a short utterance between jobs; never interrupt a video
+            # or run concurrent Whisper instances in this exclusive worker.
+            if speech_queue:
+                worker.process_utterance(min(speech_queue)[1])
+                continue
             queued = []
             for directory in videos.glob("vid_*"):
                 if (directory / ".delete").exists():

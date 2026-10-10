@@ -1,8 +1,21 @@
 import unittest
-from worker import JobError, align_segments, validate_probe
+from worker import JobError, align_segments, validate_probe, validate_utterance_probe
 
 
 class MediaValidationTests(unittest.TestCase):
+    def test_microphone_webm_without_duration_is_decoded_before_duration_check(self):
+        self.assertIsNone(validate_utterance_probe({"streams": [{"codec_type": "audio"}]}))
+        with self.assertRaises(JobError):
+            validate_utterance_probe({"streams": [{"codec_type": "audio"}]}, require_duration=True)
+
+    def test_utterances_require_audio_and_bounded_real_duration(self):
+        self.assertEqual(validate_utterance_probe({"streams": [{"codec_type": "audio"}], "format": {"duration": "4.5"}}), 4.5)
+        for duration in ("nan", "inf", "-1", "0", "31"):
+            with self.assertRaises(JobError):
+                validate_utterance_probe({"streams": [{"codec_type": "audio"}], "format": {"duration": duration}})
+        with self.assertRaises(JobError):
+            validate_utterance_probe({"streams": [{"codec_type": "video"}], "format": {"duration": "4"}})
+
     def probe(self, duration="11", audio=True, width=1280):
         streams = [{"codec_type": "video", "width": width, "height": 720, "codec_name": "h264"}]
         if audio:

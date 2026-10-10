@@ -8,6 +8,7 @@ import {
   Blocks,
   Check,
   FileVideo,
+  ChefHat,
   LayoutDashboard,
   Loader2,
   Pause,
@@ -16,10 +17,12 @@ import {
   RotateCcw,
   Settings2,
   Wrench,
+  Utensils,
   X,
 } from "lucide-react";
 import { useDemo } from "@/hooks/use-demo";
 import { useVideos } from "@/hooks/use-videos";
+import { useCashier } from "@/hooks/use-cashier";
 import { Scenario, isTerminal } from "@/lib/types";
 import { timestamp } from "@/lib/video";
 import { CallConsole } from "./call-console";
@@ -27,6 +30,10 @@ import { CallEngine, VideoEngine } from "./simple-engine";
 import { Activity, Appointments } from "./operations";
 import { CallResult } from "./call-result";
 import { VideoWorkspace } from "./video-workspace";
+import { CashierWorkspace } from "./cashier-workspace";
+import { CashierOperations } from "./cashier-operations";
+import { CashierSetup } from "./cashier-setup";
+import { CashierEngine } from "./cashier-engine";
 
 function subscribeLocation(notify: () => void) {
   window.addEventListener("popstate", notify);
@@ -47,22 +54,30 @@ function rememberRecording(id: string | null) {
 export function Workspace() {
   const demo = useDemo();
   const videos = useVideos();
+  const cashier = useCashier();
   const { state, connected, action, pending } = demo;
-  const [view, setView] = useState<"workspace" | "engine">("workspace");
+  const [view, setView] = useState<
+    "workspace" | "operations" | "setup" | "engine"
+  >("workspace");
+  const [operationTab, setOperationTab] = useState<"kitchen" | "menu">(
+    "kitchen",
+  );
   const recordingFromUrl = useSyncExternalStore(
     subscribeLocation,
     currentRecording,
     () => null,
   );
   const [taskOverride, updateTask] = useState<
-    "home" | "call" | "video" | "results" | null
+    "home" | "cashier" | "call" | "video" | "results" | null
   >(null);
   const task = taskOverride ?? (recordingFromUrl ? "video" : "home");
-  function setTask(next: "home" | "call" | "video" | "results") {
+  function setTask(next: "home" | "cashier" | "call" | "video" | "results") {
     updateTask(next);
     if (next !== "video") rememberRecording(null);
   }
-  const [engineMode, setEngineMode] = useState<"call" | "video">("call");
+  const [engineMode, setEngineMode] = useState<"cashier" | "call" | "video">(
+    "cashier",
+  );
   const [resultTab, setResultTab] = useState<
     "calls" | "appointments" | "videos"
   >("calls");
@@ -114,7 +129,7 @@ export function Workspace() {
     setTask("video");
     setView("workspace");
   }
-  function openEngine(mode: "call" | "video") {
+  function openEngine(mode: "cashier" | "call" | "video") {
     setEngineMode(mode);
     setView("engine");
   }
@@ -142,11 +157,85 @@ export function Workspace() {
   const taskTitle =
     task === "home"
       ? "What would you like to do?"
-      : task === "call"
-        ? "One conversation. A clear result."
-        : task === "video"
-          ? "Find the words. Find the moment."
-          : "Your work, saved here.";
+      : task === "cashier"
+        ? "Your order starts here."
+        : task === "call"
+          ? "One conversation. A clear result."
+          : task === "video"
+            ? "Find the words. Find the moment."
+            : "Your work, saved here.";
+  const restaurantView =
+    view === "operations" ||
+    view === "setup" ||
+    (view === "engine" && engineMode === "cashier") ||
+    (view === "workspace" && task === "cashier");
+  const openCashier = () => {
+    setView("workspace");
+    setTask("cashier");
+  };
+  const openKitchen = () => {
+    setOperationTab("kitchen");
+    setView("operations");
+  };
+  const engineToolbar = (
+    <div className="engine-toolbar">
+      <div className="segmented-control" aria-label="Engine workflow">
+        <button
+          className={engineMode === "cashier" ? "selected" : ""}
+          aria-pressed={engineMode === "cashier"}
+          onClick={() => setEngineMode("cashier")}
+        >
+          <Utensils size={15} />
+          AI Cashier
+        </button>
+        <button
+          className={engineMode === "call" ? "selected" : ""}
+          aria-pressed={engineMode === "call"}
+          onClick={() => setEngineMode("call")}
+        >
+          <Phone size={15} />
+          Demo call
+        </button>
+        <button
+          className={engineMode === "video" ? "selected" : ""}
+          aria-pressed={engineMode === "video"}
+          onClick={() => setEngineMode("video")}
+        >
+          <FileVideo size={15} />
+          Video transcription
+        </button>
+      </div>
+      {engineMode === "call" ? (
+        <select
+          aria-label="Call to inspect"
+          value={selectedCall?.id || "new"}
+          onChange={(e) => setSelectedId(e.target.value)}
+        >
+          <option value="new">No call selected</option>
+          {state?.calls.map((c) => (
+            <option key={c.id} value={c.id}>
+              {state?.customers.find((x) => x.id === c.customerId)?.name} ·{" "}
+              {c.status}
+              {c.source === "seed" ? " (example)" : ""}
+            </option>
+          ))}
+        </select>
+      ) : engineMode === "video" ? (
+        <select
+          aria-label="Video to inspect"
+          value={selectedVideo?.id || ""}
+          onChange={(e) => setSelectedVideoId(e.target.value || null)}
+        >
+          <option value="">No recording selected</option>
+          {videos.state?.jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.filename} · {j.status}
+            </option>
+          ))}
+        </select>
+      ) : null}
+    </div>
+  );
   return (
     <div className="app-shell relay-app">
       <aside className="sidebar">
@@ -167,10 +256,14 @@ export function Workspace() {
         </button>
         <div className="workspace-card">
           <span className="business-icon">
-            <Wrench size={19} />
+            {restaurantView ? <Utensils size={19} /> : <Wrench size={19} />}
           </span>
           <div>
-            <strong>Northline Auto</strong>
+            <strong>
+              {restaurantView
+                ? cashier.overview?.job.businessName || "Relay Burger"
+                : "Relay workspace"}
+            </strong>
             <span>Local workspace</span>
           </div>
         </div>
@@ -182,6 +275,7 @@ export function Workspace() {
               setView("workspace");
               setTask("home");
             }}
+            aria-label="Workspace"
             aria-current={view === "workspace" ? "page" : undefined}
           >
             <LayoutDashboard size={19} />
@@ -191,12 +285,40 @@ export function Workspace() {
             )}
           </button>
           <button
+            className={view === "operations" ? "nav-active" : ""}
+            onClick={openKitchen}
+            aria-label="Operations"
+            aria-current={view === "operations" ? "page" : undefined}
+          >
+            <ChefHat size={19} />
+            <span>Operations</span>
+            {!!cashier.overview?.orders.some(
+              (o) => o.status !== "completed",
+            ) && <span className="nav-live-dot" />}
+          </button>
+          <button
+            className={view === "setup" ? "nav-active" : ""}
+            onClick={() => setView("setup")}
+            aria-label="Agent Setup"
+            aria-current={view === "setup" ? "page" : undefined}
+          >
+            <Settings2 size={19} />
+            <span>Agent Setup</span>
+          </button>
+          <button
             className={view === "engine" ? "nav-active" : ""}
             onClick={() => {
               if (task === "video") setEngineMode("video");
               else if (task === "call") setEngineMode("call");
+              else if (
+                task === "cashier" ||
+                view === "operations" ||
+                view === "setup"
+              )
+                setEngineMode("cashier");
               setView("engine");
             }}
+            aria-label="AI Engine"
             aria-current={view === "engine" ? "page" : undefined}
           >
             <Blocks size={19} />
@@ -205,9 +327,9 @@ export function Workspace() {
         </nav>
         <div className="sidebar-environment">
           <span className="eyebrow">RUNS ON YOUR COMPUTER</span>
-          <h3>Your recordings stay local.</h3>
+          <h3>Your operations stay local.</h3>
           <p>
-            Real video transcription.
+            Real AI cashier & transcription.
             <br />
             Interactive call simulation.
           </p>
@@ -227,9 +349,21 @@ export function Workspace() {
       <div className="main-area">
         <header className="topbar">
           <div className="breadcrumb">
-            <span>Northline Auto</span>
+            <span>
+              {restaurantView
+                ? cashier.overview?.job.businessName || "Relay Burger"
+                : "Relay"}
+            </span>
             <span>/</span>
-            <strong>{view === "engine" ? "AI Engine" : "Workspace"}</strong>
+            <strong>
+              {view === "engine"
+                ? "AI Engine"
+                : view === "operations"
+                  ? "Operations"
+                  : view === "setup"
+                    ? "Agent Setup"
+                    : "Workspace"}
+            </strong>
           </div>
           <div className="topbar-right">
             <span
@@ -286,19 +420,39 @@ export function Workspace() {
           <div className="page-heading">
             <div>
               <div className="section-kicker">
-                {view === "engine" ? "BEHIND THE ACTION" : "WORKSPACE"}
+                {view === "engine"
+                  ? "BEHIND THE ACTION"
+                  : view === "operations"
+                    ? "RESTAURANT OPERATIONS"
+                    : view === "setup"
+                      ? "AI EMPLOYEE"
+                      : "WORKSPACE"}
               </div>
-              <h1>{view === "engine" ? "See how it happens." : taskTitle}</h1>
+              <h1>
+                {view === "engine"
+                  ? "See how it happens."
+                  : view === "operations"
+                    ? "From order to ready."
+                    : view === "setup"
+                      ? "Give your cashier a job."
+                      : taskTitle}
+              </h1>
               <p>
                 {view === "engine"
                   ? "Follow each step. Open the details when you need them."
-                  : task === "home"
-                    ? "Choose a workflow. Relay takes care of the next steps."
-                    : task === "call"
-                      ? "Play the customer and watch a service request become a verified operation."
-                      : task === "video"
-                        ? "Upload a video, then explore its real spoken transcript."
-                        : "Review conversations, appointments, and video transcripts."}
+                  : view === "operations"
+                    ? "A saved order, a clear kitchen queue, and a menu you control."
+                    : view === "setup"
+                      ? "Configure the Fast-Food Cashier. New sessions use your saved settings."
+                      : task === "cashier"
+                        ? "Speak or type naturally. Review your live cart, then confirm the exact order."
+                        : task === "home"
+                          ? "Choose a workflow. Relay takes care of the next steps."
+                          : task === "call"
+                            ? "Play the customer and watch a service request become a verified operation."
+                            : task === "video"
+                              ? "Upload a video, then explore its real spoken transcript."
+                              : "Review conversations, appointments, and video transcripts."}
               </p>
             </div>
           </div>
@@ -326,6 +480,18 @@ export function Workspace() {
               </button>
             </div>
           )}
+          {cashier.error && (
+            <div className="error-banner" role="alert">
+              <span>{cashier.error}</span>
+              <button
+                className="icon-button"
+                onClick={cashier.clearError}
+                aria-label="Dismiss cashier error"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
           {state && !state.agentActive && (
             <div className="notice-banner">
               <Pause size={16} />
@@ -342,7 +508,58 @@ export function Workspace() {
               </button>
             </div>
           )}
-          {!state || !consoleProps ? (
+          {view === "workspace" && task === "home" && (
+            <button className="cashier-home-entry" onClick={openCashier}>
+              <span className="cashier-home-icon">
+                <Utensils size={33} strokeWidth={1.5} />
+              </span>
+              <span className="cashier-home-copy">
+                <span className="eyebrow">
+                  FAST-FOOD CASHIER · REAL LOCAL AI
+                </span>
+                <strong>Take an order. Send it to Kitchen.</strong>
+                <span>
+                  Meet {cashier.overview?.job.agentName || "Alex"} at{" "}
+                  {cashier.overview?.job.businessName || "Relay Burger"}. A
+                  natural conversation, a live cart, and an actual saved order.
+                </span>
+              </span>
+              <span className="cashier-home-cta">
+                {cashier.session &&
+                !cashier.session.order &&
+                cashier.session.status !== "handoff"
+                  ? "Continue ordering"
+                  : "Open AI Cashier"}
+                <ArrowRight size={19} />
+              </span>
+            </button>
+          )}
+          {view === "operations" ? (
+            <CashierOperations
+              key={operationTab}
+              cashier={cashier}
+              initialTab={operationTab}
+            />
+          ) : view === "setup" ? (
+            <CashierSetup
+              cashier={cashier}
+              onMenu={() => {
+                setOperationTab("menu");
+                setView("operations");
+              }}
+            />
+          ) : view === "workspace" && task === "cashier" ? (
+            <CashierWorkspace
+              cashier={cashier}
+              onEngine={() => openEngine("cashier")}
+              onKitchen={openKitchen}
+            />
+          ) : view === "engine" && engineMode === "cashier" ? (
+            <>
+              {engineToolbar}
+              <CashierEngine cashier={cashier} onOpen={openCashier} />
+            </>
+          ) : !state || !consoleProps ? (
             <div className="loading-workspace">
               <Loader2 className="spin" size={25} />
               <h2>Opening your workspace</h2>
@@ -350,58 +567,7 @@ export function Workspace() {
             </div>
           ) : view === "engine" ? (
             <>
-              <div className="engine-toolbar">
-                <div className="segmented-control" aria-label="Engine workflow">
-                  <button
-                    className={engineMode === "call" ? "selected" : ""}
-                    aria-pressed={engineMode === "call"}
-                    onClick={() => setEngineMode("call")}
-                  >
-                    <Phone size={15} />
-                    Demo call
-                  </button>
-                  <button
-                    className={engineMode === "video" ? "selected" : ""}
-                    aria-pressed={engineMode === "video"}
-                    onClick={() => setEngineMode("video")}
-                  >
-                    <FileVideo size={15} />
-                    Video transcription
-                  </button>
-                </div>
-                {engineMode === "call" ? (
-                  <select
-                    aria-label="Call to inspect"
-                    value={selectedCall?.id || "new"}
-                    onChange={(e) => setSelectedId(e.target.value)}
-                  >
-                    <option value="new">No call selected</option>
-                    {state.calls.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {
-                          state.customers.find((x) => x.id === c.customerId)
-                            ?.name
-                        }{" "}
-                        · {c.status}
-                        {c.source === "seed" ? " (example)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <select
-                    aria-label="Video to inspect"
-                    value={selectedVideo?.id || ""}
-                    onChange={(e) => setSelectedVideoId(e.target.value || null)}
-                  >
-                    <option value="">No recording selected</option>
-                    {videos.state?.jobs.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.filename} · {j.status}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+              {engineToolbar}
               {engineMode === "call" ? (
                 <CallEngine
                   state={state}
@@ -751,7 +917,11 @@ export function Workspace() {
               <ActivityIcon size={13} />
               Relay · local workspace
             </span>
-            <span>Northline Auto is fictional · appointment times in UTC</span>
+            <span>
+              {restaurantView
+                ? "Relay Burger is fictional · local kitchen · pay at counter"
+                : "Fictional businesses · appointment times in UTC"}
+            </span>
           </footer>
         </main>
       </div>

@@ -5,7 +5,7 @@ const config: NextConfig = {
   turbopack: { root: process.cwd() },
   outputFileTracingRoot: process.cwd(),
   outputFileTracingExcludes: {
-    "/*": ["./.venv/**/*", "./.relay-data/**/*", "./.demo-data/**/*"],
+    "/*": ["./.venv/**/*", "./.relay-data/**/*", "./.demo-data/**/*", "./.cashier-data/**/*"],
   },
 };
 export default config;

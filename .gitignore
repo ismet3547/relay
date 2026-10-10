@@ -8,6 +8,7 @@ coverage/
 .font-source/
 .venv/
 .relay-data/
+.cashier-data/
 __pycache__/
 *.pyc
 *.mp4
