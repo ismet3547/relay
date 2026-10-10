@@ -1,0 +1,18 @@
+{
+  "maxUploadBytes": 104857600,
+  "maxDurationSeconds": 1800,
+  "maxRecordings": 20,
+  "maxDimension": 4096,
+  "extensions": ["mp4", "mov", "webm"],
+  "mimeTypes": [
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "application/octet-stream"
+  ],
+  "model": "base",
+  "device": "cpu",
+  "computeType": "int8",
+  "cpuThreads": 4,
+  "pollIntervalMs": 1500
+}

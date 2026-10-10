@@ -6,3 +6,12 @@ next-env.d.ts
 .env*
 coverage/
 .font-source/
+.venv/
+.relay-data/
+__pycache__/
+*.pyc
+*.mp4
+*.mov
+*.webm
+*.wav
+*.flac
